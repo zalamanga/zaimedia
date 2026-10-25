@@ -6,42 +6,59 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminAuditLog;
 use App\Models\AppNotification;
 use App\Models\Book;
+use App\Models\CheckoutOperation;
 use App\Models\Order;
 use App\Models\SystemSetting;
+use App\Models\User;
 use App\Support\Checkout;
+use App\Support\CheckoutIntent;
 use App\Support\OrderLedger;
 use App\Support\Pagination;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
+use JsonException;
 
 class OrderController extends Controller
 {
     public function store(Request $request)
     {
-        $data = $request->validate([
-            'items' => ['required', 'array', 'min:1', 'max:100'],
-            'items.*.book_id' => ['required', 'exists:books,id'],
-            'items.*.quantity' => ['nullable', 'integer', 'min:1', 'max:10'],
-            'shipping_name' => ['required', 'string', 'max:100'],
-            'shipping_phone' => ['required', 'string', 'max:20'],
-            'shipping_address' => ['required', 'string', 'max:2000'],
-            'shipping_city' => ['required', 'string', 'max:50'],
-            'shipping_postal_code' => ['required', 'string', 'max:10'],
-            'shipping_method' => ['nullable', Rule::in(['regular', 'express', 'same_day'])],
-            'payment_method' => ['nullable', Rule::in(['bank_transfer', 'credit_card', 'e_wallet', 'cod'])],
-            'notes' => ['nullable', 'string', 'max:2000'],
-        ]);
+        abort_unless($request->isJson(), 415, 'Checkout membutuhkan body JSON.');
+        try {
+            // Normalize original JSON so global empty-string conversion cannot turn an invalid quantity into 1.
+            $decoded = json_decode($request->getContent(), false, 512, JSON_THROW_ON_ERROR);
+            if (! $decoded instanceof \stdClass) {
+                throw new InvalidArgumentException('Body checkout harus berupa objek JSON.');
+            }
+            $raw = (array) $decoded;
+            if (is_array($raw['items'] ?? null)) {
+                $raw['items'] = array_map(fn ($row) => $row instanceof \stdClass ? (array) $row : $row, $raw['items']);
+            }
+            Validator::make($raw, ['operation_key' => ['required', 'string', 'uuid']])->validate();
+            $data = CheckoutIntent::normalize($raw);
+        } catch (JsonException) {
+            throw ValidationException::withMessages(['checkout' => 'Body checkout bukan JSON Unicode yang valid.']);
+        } catch (InvalidArgumentException $error) {
+            throw ValidationException::withMessages(['checkout' => $error->getMessage()]);
+        }
+        $operationKey = strtolower($raw['operation_key']);
+        $hash = CheckoutIntent::hash($data);
 
-        return DB::transaction(function () use ($data, $request) {
-            $items = collect($data['items'])
-                ->groupBy(fn ($item) => (int) $item['book_id'])
-                ->map(fn ($rows, $bookId) => [
-                    'book_id' => (int) $bookId,
-                    'quantity' => min(10, $rows->sum(fn ($row) => (int) ($row['quantity'] ?? 1))),
-                ])
-                ->values();
+        return DB::transaction(function () use ($data, $request, $operationKey, $hash) {
+            // All checkout writers lock this stable row, including the first use of a key.
+            User::whereKey($request->user()->id)->lockForUpdate()->firstOrFail();
+            $receipt = CheckoutOperation::where('customer_id', $request->user()->id)
+                ->where('operation_key', $operationKey)->first();
+            if ($receipt) {
+                abort_unless(hash_equals($receipt->intent_hash, $hash), 409, 'Operasi ini sudah memakai data checkout lain. Periksa order sebelum mencoba lagi.');
+
+                return response()->json($receipt->response_payload, 201)->header('Checkout-Replayed', 'true');
+            }
+            $items = collect($data['items']);
 
             $ids = $items->pluck('book_id');
             $books = Book::whereIn('id', $ids)->where('status', 'approved')->get()->keyBy('id');
@@ -93,8 +110,38 @@ class OrderController extends Controller
 
             AppNotification::send($request->user()->id, 'order.created', 'Order berhasil dibuat', "Order {$order->order_number} berhasil dibuat.", '/dashboard?tab=orders');
 
-            return response()->json($order->load('items.book'), 201);
+            $response = $order->load('items.book')->toArray();
+            CheckoutOperation::create([
+                'customer_id' => $request->user()->id,
+                'operation_key' => $operationKey,
+                'intent_hash' => $hash,
+                'order_id' => $order->id,
+                'response_payload' => $response,
+            ]);
+
+            return response()->json($response, 201)->header('Checkout-Replayed', 'false');
         });
+    }
+
+    public function receipt(Request $request, string $operationKey)
+    {
+        if (! Str::isUuid($operationKey)) {
+            throw ValidationException::withMessages(['operation_key' => 'Kunci operasi tidak valid.']);
+        }
+        $receipt = CheckoutOperation::where('customer_id', $request->user()->id)
+            ->where('operation_key', strtolower($operationKey))->first();
+        if (! $receipt) {
+            return response()->json([
+                'message' => 'Hasil belum dapat dikonfirmasi. Gunakan operasi yang sama untuk mencoba lagi.',
+                'outcome_unknown' => true,
+            ], 404);
+        }
+
+        return response()->json([
+            'operation_key' => $receipt->operation_key,
+            'intent_hash' => $receipt->intent_hash,
+            'order' => $receipt->response_payload,
+        ]);
     }
 
     public function mine(Request $request)

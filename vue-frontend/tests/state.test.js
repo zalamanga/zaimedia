@@ -162,3 +162,164 @@ test('private PDF requests use the authorized API endpoint and reject non-PDF co
     api.defaults.adapter = adapter;
   }
 });
+
+test('delayed logout keeps a newly established session and sends only its captured bearer', async () => {
+  const { api, getAccessToken } = await import('../src/api.js');
+  const { auth } = await import('../src/auth.js');
+  const adapter = api.defaults.adapter;
+  let finishLogout;
+  let requested;
+  const sent = new Promise((resolve) => { requested = resolve; });
+  try {
+    auth.setSession({ user: { id: 1, role: 'customer' }, token: 'old-logout-session' });
+    api.defaults.adapter = (config) => {
+      assert.equal(config.headers.Authorization, 'Bearer old-logout-session');
+      requested();
+      return new Promise((resolve) => { finishLogout = () => resolve({ config, headers: {}, status: 200, data: {} }); });
+    };
+    const pending = auth.logout();
+    auth.setSession({ user: { id: 2, role: 'customer' }, token: 'new-account-session' });
+    await sent;
+    finishLogout();
+    assert.equal(await pending, false);
+    assert.equal(auth.user.id, 2);
+    assert.equal(getAccessToken(), 'new-account-session');
+  } finally { api.defaults.adapter = adapter; }
+});
+
+test('an old request unauthorized response cannot clear a newer account', async () => {
+  const { AxiosError } = await import('axios');
+  const { api, getAccessToken } = await import('../src/api.js');
+  const { auth } = await import('../src/auth.js');
+  const adapter = api.defaults.adapter;
+  let failOld;
+  let requested;
+  const sent = new Promise((resolve) => { requested = resolve; });
+  try {
+    auth.setSession({ user: { id: 1, role: 'customer' }, token: 'old-expired-session' });
+    api.defaults.adapter = (config) => new Promise((resolve, reject) => {
+      requested();
+      failOld = () => reject(new AxiosError('Synthetic unauthorized', 'ERR_BAD_REQUEST', config, {}, { status: 401, data: {}, config }));
+    });
+    const pending = api.get('/synthetic-delayed');
+    await sent;
+    auth.setSession({ user: { id: 2, role: 'customer' }, token: 'new-valid-session' });
+    const rejected = assert.rejects(pending);
+    failOld();
+    await rejected;
+    assert.equal(auth.user.id, 2);
+    assert.equal(getAccessToken(), 'new-valid-session');
+  } finally { api.defaults.adapter = adapter; }
+});
+
+test('global cart methods lock the submitted snapshot and confirmation preserves changed carts', async () => {
+  const { auth } = await import('../src/auth.js');
+  const { cart } = await import('../src/cart.js');
+  const { checkoutState } = await import('../src/checkout.js');
+  const values = new Map();
+  const localValues = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => localValues.get(key) ?? null,
+    setItem: (key, value) => localValues.set(key, value),
+    removeItem: (key) => localValues.delete(key),
+  };
+  globalThis.sessionStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  window.setTimeout = () => 0;
+  try {
+    auth.setSession({ user: { id: 7, role: 'customer' }, token: 'cart-operation-session' });
+    cart.items = [{ id: 2, title: 'Synthetic', price: 10, quantity: 1 }];
+    const context = await checkoutState.prepare({
+      items: [{ book_id: 2, quantity: 1 }], shipping_name: 'Synthetic', shipping_phone: '000',
+      shipping_address: 'Synthetic', shipping_city: 'Test', shipping_postal_code: '00000',
+    });
+    cart.add({ id: 3, title: 'Another', price: 20 });
+    cart.remove(2); cart.setQuantity(2, 5); cart.clear();
+    assert.deepEqual(cart.items.map(({ id, quantity }) => ({ id, quantity })), [{ id: 2, quantity: 1 }]);
+    checkoutState.confirm(context, { id: 1, order_number: 'ORD-SYNTHETIC', payment_status: 'pending' });
+    cart.items = [{ id: 9, title: 'Changed separately', price: 30, quantity: 1 }];
+    assert.equal(await cart.clearConfirmed(context), 'different');
+    assert.equal(cart.items[0].id, 9);
+    cart.items = [{ id: 2, title: 'Synthetic', price: 10, quantity: 1 }];
+    cart.persist();
+    assert.equal(await cart.clearConfirmed(context), 'cleared');
+    assert.deepEqual(cart.items, []);
+    auth.setSession({ user: { id: 8, role: 'customer' }, token: 'new-cart-account' });
+    cart.items = [{ id: 9, title: 'New account', price: 30, quantity: 1 }];
+    assert.equal(await cart.clearConfirmed(context), 'stale');
+    assert.equal(cart.items[0].id, 9);
+    assert.equal(checkoutState.payload, null);
+  } finally {
+    auth.clearSession();
+    delete globalThis.sessionStorage;
+    delete globalThis.localStorage;
+  }
+});
+
+test('confirmed checkout retains its receipt when local cart cleanup cannot be verified', async () => {
+  globalThis.window ||= new EventTarget();
+  const { auth } = await import('../src/auth.js');
+  const { cart } = await import('../src/cart.js');
+  const { checkoutState } = await import('../src/checkout.js');
+  const sessionValues = new Map();
+  const localValues = new Map();
+  let blocked = false;
+  globalThis.sessionStorage = {
+    getItem: (key) => sessionValues.get(key) ?? null,
+    setItem: (key, value) => sessionValues.set(key, value),
+    removeItem: (key) => sessionValues.delete(key),
+  };
+  const localStore = {
+    getItem: (key) => { if (blocked) throw new Error('SecurityError'); return localValues.get(key) ?? null; },
+    setItem: (key, value) => { if (blocked) throw new Error('QuotaExceededError'); localValues.set(key, value); },
+    removeItem: (key) => localValues.delete(key),
+  };
+  globalThis.localStorage = localStore;
+  try {
+    auth.setSession({ user: { id: 17, role: 'customer' }, token: 'confirmed-cart-session' });
+    cart.items = [{ id: 2, title: 'Synthetic', price: 10, quantity: 1 }];
+    cart.persist();
+    const context = await checkoutState.prepare({
+      items: [{ book_id: 2, quantity: 1 }], shipping_name: 'Synthetic', shipping_phone: '000',
+      shipping_address: 'Synthetic', shipping_city: 'Test', shipping_postal_code: '00000',
+    });
+    checkoutState.confirm(context, { id: 1, order_number: 'ORD-SYNTHETIC', payment_status: 'pending' });
+    blocked = true;
+    assert.equal(await cart.clearConfirmed(context), 'storage-unavailable');
+    assert.equal(checkoutState.phase, 'confirmed');
+    assert.equal(cart.items.length, 1);
+    assert.equal(JSON.parse(localValues.get('zaimedia_cart_vue')).length, 1);
+    assert.equal(sessionValues.size, 1);
+    blocked = false;
+    const originalCart = localValues.get('zaimedia_cart_vue');
+    localValues.set('zaimedia_cart_vue', JSON.stringify([{ id: 9, title: 'Newer cart from another tab', price: 20, quantity: 2 }]));
+    assert.equal(await cart.clearConfirmed(context), 'different');
+    assert.equal(JSON.parse(localValues.get('zaimedia_cart_vue'))[0].id, 9);
+    assert.equal(cart.items[0].id, 9);
+    cart.items = JSON.parse(originalCart);
+    localValues.set('zaimedia_cart_vue', '{corrupt');
+    assert.equal(await cart.clearConfirmed(context), 'storage-unavailable');
+    assert.equal(localValues.get('zaimedia_cart_vue'), '{corrupt');
+    localValues.delete('zaimedia_cart_vue');
+    assert.equal(await cart.clearConfirmed(context), 'storage-unavailable');
+    localValues.set('zaimedia_cart_vue', originalCart);
+    delete globalThis.localStorage;
+    assert.equal(await cart.clearConfirmed(context), 'storage-unavailable');
+    assert.equal(cart.items.length, 1);
+    globalThis.localStorage = { ...localStore, setItem() {} };
+    assert.equal(await cart.clearConfirmed(context), 'storage-unavailable');
+    assert.equal(cart.items.length, 1);
+    globalThis.localStorage = localStore;
+    assert.equal(await cart.clearConfirmed(context), 'cleared');
+    assert.equal(localValues.get('zaimedia_cart_vue'), '[]');
+    assert.deepEqual(cart.items, []);
+    assert.equal(checkoutState.acknowledge(), true);
+  } finally {
+    auth.clearSession();
+    delete globalThis.sessionStorage;
+    delete globalThis.localStorage;
+  }
+});

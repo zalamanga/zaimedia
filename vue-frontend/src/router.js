@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { auth } from './auth';
+import { checkoutState } from './checkout.js';
+import { toast } from './toast.js';
 import HomeView from './views/HomeView.vue';
 import AboutView from './views/AboutView.vue';
 import ArticlesView from './views/ArticlesView.vue';
@@ -32,6 +34,10 @@ const router = createRouter({
 });
 
 router.beforeEach((to) => {
+  if (checkoutState.busy) {
+    toast.info('Tunggu konfirmasi checkout sebelum berpindah halaman.');
+    return false;
+  }
   if (to.meta.auth && !auth.isLoggedIn) {
     return { path: '/login', query: { redirect: to.fullPath } };
   }

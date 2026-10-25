@@ -1,0 +1,67 @@
+[
+  {
+    "name": "Unicode edges, duplicate cap and numeric item order",
+    "input": {
+      "items": [{"book_id": 12, "quantity": 7}, {"book_id": 2}, {"book_id": 12, "quantity": 8}],
+      "shipping_name": "\u200b Éka 😀 \ufeff",
+      "shipping_phone": " 000 ",
+      "shipping_address": "\u0085Jalan / Buku\nNo. 2\u3000",
+      "shipping_city": "\u00a0Kota\u00a0",
+      "shipping_postal_code": " 00000 ",
+      "shipping_method": null,
+      "payment_method": "",
+      "notes": " é\u2028baris\u2029akhir "
+    },
+    "expected": {
+      "items": [{"book_id": 2, "quantity": 1}, {"book_id": 12, "quantity": 10}],
+      "shipping_name": "Éka 😀",
+      "shipping_phone": "000",
+      "shipping_address": "Jalan / Buku\nNo. 2",
+      "shipping_city": "Kota",
+      "shipping_postal_code": "00000",
+      "shipping_method": "regular",
+      "payment_method": "bank_transfer",
+      "notes": "é\u2028baris\u2029akhir"
+    },
+    "sha256": "c30d5533ec78f71176541365b605a4d8570a4e3d9043998c50c49ec6d6eee0ce"
+  },
+  {
+    "name": "Safe integer boundary, null quantity and literal zero notes",
+    "input": {
+      "items": [{"book_id": 9007199254740991, "quantity": null}],
+      "shipping_name": "0",
+      "shipping_phone": "0",
+      "shipping_address": "0",
+      "shipping_city": "0",
+      "shipping_postal_code": "0",
+      "shipping_method": "express",
+      "payment_method": "e_wallet",
+      "notes": "0"
+    },
+    "expected": {
+      "items": [{"book_id": 9007199254740991, "quantity": 1}],
+      "shipping_name": "0",
+      "shipping_phone": "0",
+      "shipping_address": "0",
+      "shipping_city": "0",
+      "shipping_postal_code": "0",
+      "shipping_method": "express",
+      "payment_method": "e_wallet",
+      "notes": "0"
+    },
+    "sha256": "5e7a2bed48f33922a30af85f643ab8751e4bb9afc53d488ffb6f05aa75e3705b"
+  },
+  {
+    "name": "Finite whole numeric values use the same integer form",
+    "input": {
+      "items": [{"book_id": 2e0, "quantity": 1.0}],
+      "shipping_name": "Test", "shipping_phone": "000", "shipping_address": "Synthetic", "shipping_city": "Test", "shipping_postal_code": "00000"
+    },
+    "expected": {
+      "items": [{"book_id": 2, "quantity": 1}],
+      "shipping_name": "Test", "shipping_phone": "000", "shipping_address": "Synthetic", "shipping_city": "Test", "shipping_postal_code": "00000",
+      "shipping_method": "regular", "payment_method": "bank_transfer", "notes": null
+    },
+    "sha256": "3b18e5c1b3fe1710b5c481ffda40bd979836830727957cb7428cd7cd0160f65e"
+  }
+]

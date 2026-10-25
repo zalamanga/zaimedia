@@ -21,7 +21,7 @@ flowchart LR
 
 ## Sesi dan otorisasi
 
-[auth.js](../vue-frontend/src/auth.js) mengirim login/register melalui [api.js](../vue-frontend/src/api.js), lalu menyimpan user/token di state Vue dan localStorage melalui [storage.js](../vue-frontend/src/storage.js). Password bukan isi sesi tersimpan. Interceptor menambahkan Bearer token pada request API. Respons 401 atau akun yang dinonaktifkan menghapus sesi lokal; App menangani pemberitahuan/login ulang. Logout mencoba mencabut token server dan tetap membersihkan state lokal bila jaringan gagal.
+[auth.js](../vue-frontend/src/auth.js) mengirim login/register melalui [api.js](../vue-frontend/src/api.js), lalu menyimpan user/token di state Vue dan localStorage melalui [storage.js](../vue-frontend/src/storage.js). Password bukan isi sesi tersimpan. Interceptor menambahkan Bearer token jika request tidak membawa token eksplisit. Respons401/nonaktif hanya menghapus sesi yang masih memakai token request tersebut. Logout membersihkan sesi lokal segera, lalu mencabut token yang ditangkap; respons logout lama tidak menghapus login baru. Pergantian sesi melepas payload checkout pribadi di memori.
 
 [AuthController](../laravel-api/app/Http/Controllers/Api/AuthController.php) memvalidasi input, membuat hash password dan menerbitkan token Sanctum. Registrasi memaksa role customer/status active; login tidak menerima akun nonaktif. [EnsureActiveUser](../laravel-api/app/Http/Middleware/EnsureActiveUser.php) dan [EnsureRole](../laravel-api/app/Http/Middleware/EnsureRole.php) mengendalikan endpoint privat. super_admin diizinkan ketika kelompok role mencakup admin. Mengubah localStorage atau tampilan menu bukan pemberian role server.
 
@@ -37,15 +37,25 @@ flowchart TD
     B --> C[CartView: GET storefront-config untuk estimasi pajak]
     C --> D{Sudah login dan konfigurasi siap?}
     D -->|Belum login| E[Login lalu kembali ke cart]
-    D -->|Ya| F[POST orders: ID buku, jumlah dan data formulir]
-    F --> G[OrderController: validasi dan transaksi]
-    G --> H[Ambil harga buku approved di server]
+    D -->|Ya| F[checkout-state: bekukan intent dan simpan key/hash tab]
+    F --> G[POST orders: key dan intent; kunci row user]
+    G --> R{Receipt untuk akun/key sudah ada?}
+    R -->|Hash sama| S[Respons snapshot pertama tanpa order baru]
+    R -->|Hash berbeda| T[409: periksa order]
+    R -->|Belum| H[Ambil harga buku approved di server]
     H --> I[Hitung subtotal, pajak dan total server]
     I --> J[Buat Order dan item snapshot]
-    J --> K[Respons sukses: cart dibersihkan, buka hasil order]
+    J --> L[Simpan receipt dalam transaksi yang sama]
+    L --> K[Konfirmasi: hanya bersihkan cart yang masih cocok]
+    S --> K
+    G -->|Respons hilang| U[Hasil belum jelas: periksa receipt atau retry key sama]
 ```
 
 [CartView.vue](../vue-frontend/src/views/CartView.vue) tidak mengirim harga cart sebagai sumber tagihan. [OrderController](../laravel-api/app/Http/Controllers/Api/OrderController.php) menggabungkan ID ganda, membatasi qty, menolak buku yang tidak tersedia dan pembelian buku sendiri. Pajak memakai SystemSetting server; shipping_cost saat ini nol walaupun form mempertahankan data/metode alamat sumber.
+
+[checkout-state.js](../vue-frontend/src/checkout-state.js) mengunci intent selama submit/hasil belum jelas. [cart.js](../vue-frontend/src/cart.js) juga menjaga mutasi dari halaman lain. Route guard menahan navigasi selama request aktif; hasil dari sesi lama diabaikan. Setelah reload, hanya metadata non-PII yang tersisa: receipt diperiksa untuk akun sendiri, atau pengguna mengisi ulang intent yang hash-nya sama dengan konfirmasi eksplisit.404 tidak membebaskan kunci lama. Normalisasi Unicode/hash, unique constraint, respons replay dan batas storage dijelaskan di [CHECKOUT_PROTOCOL](CHECKOUT_PROTOCOL.md).
+
+Konfirmasi server dipisahkan dari penyelesaian cart lokal. Cart memeriksa kembali identitas di memori dan localStorage, mempertahankan cart valid yang berbeda, lalu memverifikasi penulisan kosong sebelum melepas receipt di browser. Kegagalan storage menampilkan konfirmasi order dengan retry lokal, bukan mengirim POST baru. Cover, judul, kontrol jumlah dan estimasi total membungkus baris agar ukuran teks besar tidak saling menimpa.
 
 [Checkout::autoPaid](../laravel-api/app/Support/Checkout.php) hanya aktif pada local/testing dengan kedua flag demo dan pengaturan database yang mengizinkan. Selain itu order dimulai pending. Tidak ada payment gateway/transfer nyata. [OrderSuccessView.vue](../vue-frontend/src/views/OrderSuccessView.vue) menampilkan hasil/status dari API, bukan menganggap semua order sudah lunas.
 
@@ -84,4 +94,4 @@ Tombol dashboard memakai endpoint yang tercantum di routes/api.php; middleware/c
 
 ## Pemeriksaan yang tersedia
 
-[vue-frontend/tests/state.test.js](../vue-frontend/tests/state.test.js) memeriksa state/storage/gate menggunakan mock. [laravel-api/tests/Feature](../laravel-api/tests/Feature) mencakup auth, role, upload/PDF dan alur admin. [tests/api.spec.js](../tests/api.spec.js) serta [tests/browser.spec.js](../tests/browser.spec.js) memakai stack/fixture uji yang dijaga, sesuai [README](../README.md). Dokumen ini disusun dari pembacaan source saja; tidak menjalankan aplikasi, memakai kredensial/database privat atau mengubah frontend/backend.
+[vue-frontend/tests/state.test.js](../vue-frontend/tests/state.test.js) dan [checkout.test.js](../vue-frontend/tests/checkout.test.js) memeriksa storage, intent, sesi lama, cart dan pemulihan. [Tes PHP murni](../laravel-api/tests/checkout-intent.php) memakai vector hash yang sama. [CheckoutOperationTest](../laravel-api/tests/Feature/CheckoutOperationTest.php) menguji receipt/transaksi di SQLite terisolasi. [tests/checkout.spec.js](../tests/checkout.spec.js) mencakup konkurensi HTTP native, respons hilang setelah commit, reload, storage, pergantian sesi dan geometri layout. [tests/api.spec.js](../tests/api.spec.js) serta [tests/browser.spec.js](../tests/browser.spec.js) mempertahankan regresi aplikasi sebelumnya. Semua tes integrasi memakai stack/fixture uji yang dijaga, sesuai [README](../README.md). Hasil dan batas pemeriksaan dicatat per tahap; suite sebelum perubahan layout tidak diklaim sebagai pengulangan penuh sesudahnya.

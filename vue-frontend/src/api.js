@@ -22,7 +22,7 @@ export const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const token = getAccessToken();
-  if (token) {
+  if (token && !config.headers.has('Authorization')) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
@@ -32,7 +32,8 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const inactiveAccount = error.response?.status === 403 && error.response?.data?.message === 'Akun tidak aktif';
-    if (error.response?.status === 401 || inactiveAccount) {
+    const sentAuthorization = error.config?.headers?.get?.('Authorization') ?? error.config?.headers?.Authorization;
+    if ((error.response?.status === 401 || inactiveAccount) && accessToken && sentAuthorization === `Bearer ${accessToken}`) {
       const hadSession = Boolean(accessToken);
       setAccessToken(null);
       removeStored('zaimedia_user');

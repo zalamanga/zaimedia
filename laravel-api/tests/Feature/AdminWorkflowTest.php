@@ -9,6 +9,7 @@ use App\Models\WriterRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -225,6 +226,7 @@ class AdminWorkflowTest extends TestCase
     private function orderPayload(int $bookId): array
     {
         return [
+            'operation_key' => (string) Str::uuid(),
             'items' => [
                 ['book_id' => $bookId, 'quantity' => 1],
             ],

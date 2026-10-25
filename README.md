@@ -6,6 +6,16 @@ Aplikasi toko buku digital dengan **Laravel 13 / PHP 8.3+** sebagai API dan **Vu
 
 Checkout belum terhubung ke payment gateway. Mode normal membuat order **pending**. Mode demo dapat mensimulasikan order paid, tanpa memindahkan uang sungguhan.
 
+Checkout memakai identitas operasi per akun agar respons yang hilang dapat diperiksa atau dikirim ulang dengan kunci yang sama. Cart dan formulir dikunci saat pengiriman. Bila hasil belum jelas, gunakan kontrol pemulihan di halaman checkout. Rincian retry, penyimpanan tab dan batas pemulihannya ada di [kontrak checkout](docs/CHECKOUT_PROTOCOL.md).
+
+## Cuplikan checkout
+
+Tampilan Chrome dari stack MySQL dengan akun dan buku sintetis dalam mode demo. Pada gambar ini, respons sengaja diputus setelah server menyimpan order; pengguna dapat memeriksa hasil atau mencoba operasi yang sama.
+
+![Checkout dengan hasil pengiriman yang belum dapat dikonfirmasi](docs/images/checkout-recovery.png)
+
+Jika order sudah tersimpan tetapi cart lokal belum berhasil dibersihkan, UI menawarkan pembersihan lokal tanpa membuat order lain. Lihat [tampilan konfirmasi lokal](docs/images/checkout-confirmed-local.png) dan [tampilan pada viewport 640 px](docs/images/checkout-640.png). Tidak ada pembayaran nyata pada cuplikan ini.
+
 ## Menjalankan dengan Docker
 
 Siapkan Docker Desktop dengan Linux containers, Git, dan Python 3. Jalankan dari folder repository:
@@ -110,10 +120,20 @@ npm --prefix vue-frontend run build
 
 Verifikasi 22 Oktober 2026: 18 tes backend (140 assertion), 13 tes unit frontend, dan 30 kasus API/browser Chrome lulus. Sesudah koreksi warna label menu mobile, satu kasus writer diperiksa ulang. Docker juga diuji dengan MySQL kosong, upload PDF 50 MiB, serta persistensi database, pengaturan, APP_KEY dan berkas setelah restart.
 
+Pembaruan checkout pada 26 Oktober 2026 diperiksa dengan **25 tes PHP (199 assertion)**, **31 tes unit frontend**, dan **18 pemeriksaan normalisasi PHP/JavaScript**. Pada MySQL 8.4.11, tiga POST bersamaan dengan kunci/data yang sama menghasilkan satu order; replay, konflik data, receipt milik akun sendiri, parser JSON asli dan mode pending juga diperiksa. Runtime native memakai PHP 8.3.36. Suite SQLite memakai PHP 8.5.12 dan mencatat satu deprecation dari konstanta PDO pada konfigurasi lama, tanpa kegagalan tes.
+
+Bukti browser dipisahkan menurut perubahan: 30 kasus API/browser lama lulus sebelum koreksi parser dan tampilan terakhir. Setelahnya, satu kasus konkurensi native dan 11 kasus Chrome checkout lulus. Perapian layout terakhir diperiksa lagi melalui lima kasus fokus, termasuk judul panjang/quantity 10 pada viewport 320/390/640/1280 dan ukuran teks CSS 100%/200%. Pemeriksaan ukuran teks ini tidak mensimulasikan seluruh perilaku zoom browser.
+
 Tes frontend menggunakan Node, storage palsu, dan adapter API mock; tidak menghubungi database:
 
 ```sh
 npm --prefix vue-frontend test
+```
+
+Vector normalisasi dapat diperiksa tanpa dependency Laravel:
+
+```sh
+php -n laravel-api/tests/checkout-intent.php
 ```
 
 Tes backend dapat dijalankan melalui container:

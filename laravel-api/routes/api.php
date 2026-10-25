@@ -65,6 +65,7 @@ Route::middleware(['auth:sanctum', 'active.user'])->group(function () {
 
     Route::middleware('role:customer,writer,admin')->group(function () {
         Route::post('/orders', [OrderController::class, 'store']);
+        Route::get('/checkout-operations/{operationKey}', [OrderController::class, 'receipt']);
         Route::get('/orders/me', [OrderController::class, 'mine']);
         Route::get('/orders/by-number/{orderNumber}', [OrderController::class, 'showByNumber']);
         Route::get('/orders/{order}', [OrderController::class, 'show']);

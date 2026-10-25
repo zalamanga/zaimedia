@@ -39,6 +39,8 @@ Transisi paid menghasilkan satu catatan penjualan per buku/order. Pembaruan stat
 | Endpoint | Akses dan respons |
 | --- | --- |
 | `GET /api/storefront-config` | Publik; hanya `tax_rate` dan `checkout_demo_mode` efektif. |
+| `POST /api/orders` | JSON, akun customer/writer/admin aktif; wajib UUID `operation_key`. Retry data sama mengembalikan snapshot `201` yang sama; data berbeda untuk kunci yang sama mendapat `409`. |
+| `GET /api/checkout-operations/{key}` | Receipt hanya untuk akun sendiri; `404` berarti hasil belum jelas, bukan bukti order gagal. |
 | `GET /api/books` dan `/api/books/{id-or-slug}` | Publik; `has_pdf` boolean, tanpa `pdf_file` atau URL PDF. |
 | `POST /api/uploads/cover` | Writer/admin; field multipart `cover`, menghasilkan `file` + URL publik. |
 | `POST /api/uploads/pdf` | Writer/admin; field multipart `pdf`, menghasilkan basename `file` tanpa URL publik. |
@@ -46,6 +48,8 @@ Transisi paid menghasilkan satu catatan penjualan per buku/order. Pembaruan stat
 | `GET /api/library/{id}/download` | Izin yang sama; PDF inline dengan `Cache-Control: private, no-store`. |
 
 Kirim Bearer token saat mengambil PDF, baca sebagai Blob, dan gunakan object URL di reader. Jangan membuat URL PDF dari nama berkas. PDF disimpan di disk `private` (`storage/app/private/books/pdf`), sedangkan cover/avatar/artikel di disk `uploads` (`public/uploads`). Server web tidak boleh memetakan storage privat sebagai file publik.
+
+Detail normalisasi data, transaksi receipt dan pemulihan browser ada di [CHECKOUT_PROTOCOL](../docs/CHECKOUT_PROTOCOL.md). Jalankan migration tambahan sebelum frontend baru dipakai. Receipt tidak dihapus otomatis; deployment ini tidak mengimpor order atau data pribadi dari sumber lama.
 
 Referensi file baru pada buku/artikel harus berasal dari upload akun yang sama. Nilai nama file lama boleh dipertahankan pada record tersebut. Kolom `pdf_file` kosong saat update buku mempertahankan PDF yang ada. Penggantian hanya menghapus file terdaftar yang tidak dipakai buku lain. PDF/cover buku yang diarsipkan tetap disimpan agar histori dan akses pembeli tetap bekerja.
 

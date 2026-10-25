@@ -55,7 +55,8 @@ function handleUnauthorized() {
 }
 
 async function logout() {
-  await auth.logout();
+  const loggedOut = await auth.logout();
+  if (!loggedOut) return;
   toast.info('Kamu sudah logout.');
   router.push('/');
 }

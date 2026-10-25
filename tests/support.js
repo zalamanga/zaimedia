@@ -22,7 +22,7 @@ function isolation(baseURL) {
     if (!path) throw new Error('Set ZAIMEDIA_TEST_FIXTURE_FILE to the private isolated-test JSON file.');
     fixture = JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, ''));
   }
-  if (fixture.project !== 'zaimedia-codex-check-20261022'
+  if (!['zaimedia-codex-check-20261022', 'codex-zaimedia-followup-20261026'].includes(fixture.project)
     || fixture.allowMutations !== true
     || new URL(fixture.baseURL).origin !== target.origin
     || typeof fixture.password !== 'string'
@@ -163,7 +163,7 @@ export async function loginThroughForm(page, baseURL, username = usernames.custo
       user: JSON.parse(localStorage.getItem('zaimedia_user')),
     }));
     // Login deliberately revokes older tokens for this synthetic account.
-    sessions.set('customer', Promise.resolve(current));
+    if (username === usernames.customer) sessions.set('customer', Promise.resolve(current));
   } finally {
     // Playwright's failure context can include password input values.
     const passwordField = page.getByLabel('Password', { exact: true });

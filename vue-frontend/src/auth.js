@@ -2,6 +2,7 @@ import { reactive } from 'vue';
 import { api, getAccessToken, setAccessToken } from './api.js';
 import { readJson, removeStored, writeJson } from './storage.js';
 import { validUser } from './state-utils.js';
+import { checkoutState } from './checkout.js';
 
 const savedUser = readJson('zaimedia_user', null, validUser);
 if (!savedUser) setAccessToken(null);
@@ -23,16 +24,21 @@ export const auth = reactive({
     return data.user;
   },
   async logout() {
+    const token = this.token;
+    this.clearSession();
     try {
-      await api.post('/auth/logout');
+      if (token) await api.post('/auth/logout', null, { headers: { Authorization: `Bearer ${token}` } });
     } catch {
       // Local logout must also work when the API cannot be reached.
-    } finally {
-      this.user = null;
-      this.token = null;
-      removeStored('zaimedia_user');
-      setAccessToken(null);
     }
+    return !this.token;
+  },
+  clearSession() {
+    this.user = null;
+    this.token = null;
+    removeStored('zaimedia_user');
+    setAccessToken(null);
+    checkoutState.setAccount(null);
   },
   setSession(data) {
     if (!validUser(data.user) || typeof data.token !== 'string' || !data.token) {
@@ -42,6 +48,7 @@ export const auth = reactive({
     this.token = data.token;
     writeJson('zaimedia_user', data.user);
     setAccessToken(data.token);
+    checkoutState.setAccount(data.user.id, data.token);
   },
   async refreshMe() {
     if (!this.token) return null;
@@ -56,6 +63,7 @@ export const auth = reactive({
 });
 
 window.addEventListener('zaimedia:unauthorized', () => {
-  auth.user = null;
-  auth.token = null;
+  auth.clearSession();
 });
+
+checkoutState.setAccount(auth.user?.id, auth.token);

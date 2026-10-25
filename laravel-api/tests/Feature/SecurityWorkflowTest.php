@@ -13,6 +13,7 @@ use Database\Seeders\DemoSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -268,6 +269,7 @@ class SecurityWorkflowTest extends TestCase
     private function payload(Book $book): array
     {
         return [
+            'operation_key' => (string) Str::uuid(),
             'items' => [['book_id' => $book->id, 'quantity' => 1]],
             'shipping_name' => 'Test', 'shipping_phone' => '000', 'shipping_address' => 'Synthetic',
             'shipping_city' => 'Test', 'shipping_postal_code' => '00000',
