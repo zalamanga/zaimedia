@@ -1,5 +1,7 @@
 # Zaimedia
 
+Alur Vue, autentikasi API, checkout, akses PDF dan dashboard dijelaskan di [CODE_FLOW](docs/CODE_FLOW.md).
+
 Aplikasi toko buku digital dengan **Laravel 13 / PHP 8.3+** sebagai API dan **Vue 3 / Vite 8 / Tailwind CSS** sebagai frontend. Katalog, artikel, keranjang, perpustakaan PDF, dan dashboard customer, writer, admin, serta super_admin tersedia dalam satu aplikasi.
 
 Checkout belum terhubung ke payment gateway. Mode normal membuat order **pending**. Mode demo dapat mensimulasikan order paid, tanpa memindahkan uang sungguhan.
